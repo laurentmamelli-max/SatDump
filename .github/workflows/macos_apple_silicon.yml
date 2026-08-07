@@ -1,0 +1,82 @@
+name: Build macOS Apple Silicon DMG
+
+on:
+  push:
+    branches:
+      - build/macos-apple-silicon-20260807
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: Release
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+  osx_target: "11.0"
+
+jobs:
+  build_macos_silicon:
+    name: Build SatDump DMG (Apple Silicon)
+    runs-on: macos-15
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 16.2
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+
+      - name: Install build dependencies
+        run: >-
+          brew install dylibbundler libtool autoconf automake meson orc
+          libxml2 zlib portaudio boost libusb nng volk libjpeg-turbo libtiff
+          libomp libpng glfw fftw jemalloc zstd armadillo hdf5 sqlite3
+
+      - name: Cache SatDump dependencies
+        id: macos-deps
+        uses: actions/cache@v4
+        with:
+          path: deps
+          key: macos-silicon-deps-v1-${{ hashFiles('macOS/build_deps.sh') }}
+
+      - name: Build SatDump dependencies
+        if: steps.macos-deps.outputs.cache-hit != 'true'
+        working-directory: ${{ runner.workspace }}
+        shell: bash
+        run: $GITHUB_WORKSPACE/macOS/build_deps.sh
+
+      - name: Configure SatDump for ARM64
+        working-directory: ${{ runner.workspace }}
+        run: >-
+          cmake -S "$GITHUB_WORKSPACE" -B build
+          -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+          -DBUNDLING_MODE=ON
+          -DCMAKE_OSX_ARCHITECTURES=arm64
+          -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+
+      - name: Compile SatDump
+        run: cmake --build "${{ runner.workspace }}/build" --parallel 6
+
+      - name: Create application and DMG
+        working-directory: ${{ runner.workspace }}/build
+        shell: bash
+        run: $GITHUB_WORKSPACE/macOS/bundle.sh
+
+      - name: Verify ARM64 application
+        working-directory: ${{ runner.workspace }}/build
+        shell: bash
+        run: |
+          test -f SatDump-macOS-Silicon.dmg
+          test -d MacApp/SatDump.app
+          file MacApp/SatDump.app/Contents/MacOS/satdump-ui | tee architecture.txt
+          grep -q "arm64" architecture.txt
+          codesign --verify --deep --strict MacApp/SatDump.app
+
+      - name: Upload SatDump DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: SatDump-macOS-Silicon-${{ github.sha }}
+          path: ${{ runner.workspace }}/build/SatDump-macOS-Silicon.dmg
+          if-no-files-found: error
+          retention-days: 30
