@@ -33,12 +33,18 @@ jobs:
           libxml2 zlib portaudio boost libusb nng volk libjpeg-turbo libtiff
           libomp libpng glfw fftw jemalloc zstd armadillo hdf5 sqlite3
 
+      - name: Disable unavailable SDRPlay binary
+        shell: bash
+        run: |
+          sed -i '' '/echo "Adding SDRPlay Library..."/,/rm -rf sdrplay-macos\*/d' macOS/build_deps.sh
+          sed -i '' '/libsdrplay.*dylib/d' macOS/bundle.sh
+
       - name: Cache SatDump dependencies
         id: macos-deps
         uses: actions/cache@v4
         with:
           path: deps
-          key: macos-silicon-deps-v1-${{ hashFiles('macOS/build_deps.sh') }}
+          key: macos-silicon-deps-v2-${{ hashFiles('macOS/build_deps.sh') }}
 
       - name: Build SatDump dependencies
         if: steps.macos-deps.outputs.cache-hit != 'true'
@@ -54,6 +60,7 @@ jobs:
           -DBUNDLING_MODE=ON
           -DCMAKE_OSX_ARCHITECTURES=arm64
           -DCMAKE_OSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+          -DPLUGIN_SDRPLAY_SDR_SUPPORT=OFF
 
       - name: Compile SatDump
         run: cmake --build "${{ runner.workspace }}/build" --parallel 6
